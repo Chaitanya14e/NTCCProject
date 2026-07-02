@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 function VideoDetails(){
-
+    const BASE_URL = import.meta.env.VITE_BACKEND_URL;
     const { id } = useParams();
 
     const navigate = useNavigate();
@@ -13,10 +13,10 @@ function VideoDetails(){
     useEffect(()=>{
 
         axios
-        .get(`http://localhost:4000/video/${id}`)
+        .get(`${BASE_URL}/video/${id}`)
         .then(res=>setVideo(res.data));
 
-    },[id]);
+    },[id,BASE_URL]);
 
     if(!video){
 

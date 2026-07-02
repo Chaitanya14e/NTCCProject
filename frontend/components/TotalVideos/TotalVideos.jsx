@@ -7,11 +7,11 @@ function TotalVideos() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ total: 0 });
   const [videos, setVideos] = useState([]);
-
+  const BASE_URL = import.meta.env.VITE_BACKEND_URL;
   useEffect(() => {
     getDashboardStats().then(setStats).catch(console.log);
     axios
-      .get("http://localhost:4000/video/all")
+      .get(`${BASE_URL}/video/all`)
       .then((res) => setVideos(res.data))
       .catch(() => setVideos([]));
   }, []);

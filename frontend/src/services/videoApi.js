@@ -1,7 +1,8 @@
 import axios from "axios";
+const BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
 const API = axios.create({
-    baseURL: "http://localhost:4000/video"
+    baseURL: `${BASE_URL}/video`
 });
 
 export const uploadVideo = async(file)=>{

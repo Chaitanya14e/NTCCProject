@@ -7,11 +7,11 @@ function CleanVideos() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ clean: 0 });
   const [videos, setVideos] = useState([]);
-
+  const BASE_URL = import.meta.env.VITE_BACKEND_URL;
   useEffect(() => {
     getDashboardStats().then(setStats).catch(console.log);
     axios
-      .get("http://localhost:4000/video/clean")
+      .get(`${BASE_URL}/video/clean`)
       .then((res) => setVideos(res.data.clean))
       .catch(() => setVideos([]));
   }, []);

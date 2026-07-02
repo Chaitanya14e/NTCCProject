@@ -7,14 +7,14 @@ function AnomalyVideos() {
   const navigate = useNavigate();
   const [stats, setStats] = useState({ anomalies: 0 });
   const [videos, setVideos] = useState([]);
-
+  const BASE_URL = import.meta.env.VITE_BACKEND_URL;
   useEffect(() => {
     getDashboardStats().then(setStats).catch(console.log);
     axios
-      .get("http://localhost:4000/video/anomalies")
+      .get(`${BASE_URL}/video/anomalies`)
       .then((res) => setVideos(res.data.anomaly))
       .catch(() => setVideos([]));
-  }, []);
+  }, [BASE_URL]);
 
   return (
     <div className="min-h-screen bg-slate-50">
