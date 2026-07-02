@@ -2,26 +2,40 @@ import mongoose from "mongoose";
 
 const videoSchema = new mongoose.Schema({
 
-    fileName:String,
-
-    status:String,
-
-    anomalyTime:String,
-
-    confidence:Number,
-
-    framePath:{
-        type:String
+    fileName: {
+        type: String,
+        required: true
     },
 
-    createdAt:{
-        type:Date,
-        default:Date.now
+    status: {
+        type: String,
+        required: true
+    },
+
+    anomalyTime: {
+        type: String
+    },
+
+    confidence: {
+        type: Number,
+        required: true
+    },
+
+    framePath: {
+        type: String,
+        default: null
+    },
+
+    videoPath: {
+        type: String,
+        default: null
     }
+
+}, {
+    timestamps: true
 });
 
-export const Video =
-mongoose.model(
+export const Video = mongoose.model(
     "Video",
     videoSchema
 );

@@ -5,6 +5,7 @@ import { Upload, Bell, AlertTriangle, CheckCircle, TrendingUp, X, Shield, Video,
 import { useNavigate, useLocation } from "react-router-dom";
 import { getNotifications, markAllNotificationsRead,deleteNotification } from "./services/notificationApi.js";
 
+
 function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -413,9 +414,9 @@ function App() {
                     {/* ← Add this X button */}
                     <button
                       onClick={() => handleDeleteNotification(item._id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 self-start mt-0.5"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-slate-200 self-start mt-0.5"
                     >
-                      <X size={11} className="text-slate-400" />
+                      <X size={11} className="text-red-400" />
                     </button>
                   </div>
                 </div>

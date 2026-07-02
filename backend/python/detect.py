@@ -294,7 +294,6 @@ if len(sequences) == 0:
     print(json.dumps(result))
     sys.exit()
 
-# ── Coarse inference pass (matches training exactly) ──────
 all_scores = []
 
 with torch.no_grad():
@@ -441,9 +440,6 @@ if max_score > THRESHOLD:
                 "No YOLO detection found in TARGET_CLASSES",
                 file=sys.stderr
             )
-            # NOTE: deliberately NOT drawing a full-frame border here —
-            # that was the cause of "highlighting whole camera" before.
-            # We just leave the frame unmarked except for the confidence text.
 
         cv2.putText(frame, f"Anomaly: {anomaly_confidence:.1f}%",
                     (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)

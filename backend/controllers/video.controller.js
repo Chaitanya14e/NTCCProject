@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import { Video } from "../models/video.models.js";
 import { Notification } from "../models/notification.models.js";
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 export const uploadVideo = async (req, res) => {
 
@@ -25,40 +26,75 @@ export const uploadVideo = async (req, res) => {
         });
 
         python.stderr.on("data", (data) => {
-            console.log(
-                "PYTHON ERROR:",
-                data.toString()
-            );
+            console.log("PYTHON ERROR:", data.toString());
         });
 
         python.on("close", async () => {
 
             console.log("Python Output:", output);
 
-            // FIXED: use "output" instead of undefined "stdout"
-            const lines = output.trim().split('\n');
+            const lines = output.trim().split("\n");
             const lastLine = lines[lines.length - 1];
 
             let result;
+
             try {
+
                 result = JSON.parse(lastLine);
+
             } catch (err) {
-                console.error("Failed to parse Python output. Raw output:", output);
+
+                console.error("Failed to parse Python output:", output);
+
                 return res.status(500).json({
                     message: "Invalid JSON from Python script"
                 });
+
             }
 
+            // Upload original video AFTER Python finishes
+            const uploadedVideo = await uploadOnCloudinary(
+                req.file.path,
+                "video",
+                "NTCC/videos"
+            );
+            console.log("Uploaded Video Object:", uploadedVideo);
+
+            // Upload frame if available
+            let uploadedFrame = null;
+
+            if (result.frame) {
+
+                uploadedFrame = await uploadOnCloudinary(
+                    "." + result.frame,
+                    "image",
+                    "NTCC/frames"
+                );
+
+                result.frame = uploadedFrame?.secure_url;
+            }
+            console.log("Uploaded Frame Object:", uploadedFrame);
+
             try {
-                const savedVideo = await Video.create({
-                    fileName: req.file.filename,
+
+                await Video.create({
+
+                    fileName: req.file.originalname,
+
                     status: result.status,
+
                     anomalyTime: result.time,
+
                     confidence: result.confidence,
-                    framePath: result.frame
+
+                    framePath: result.frame,
+
+                    videoPath: uploadedVideo?.secure_url
+
                 });
 
                 await Notification.create({
+
                     title:
                         result.status === "anomaly"
                             ? "Anomaly Detected"
@@ -70,33 +106,84 @@ export const uploadVideo = async (req, res) => {
                             : `${req.file.originalname} is clean`,
 
                     type: result.status,
+
                     fileName: req.file.originalname,
+
                     confidence: result.confidence,
+
                     anomalyTime: result.time
+
                 });
 
                 return res.json(result);
 
             } catch (dbError) {
-                console.error("Database error:", dbError);
+
+                console.error("Database Error:", dbError);
+
                 return res.status(500).json({
-                    message: "Failed to save video/notification"
+                    message: "Failed to save data"
                 });
+
             }
+
         });
 
     } catch (error) {
 
-        console.log(error);
+        console.error(error);
 
         return res.status(500).json({
             message: error.message
         });
 
     }
+
 };
 
 export const getAllVideos = async (req, res) => {
-    const videos = await Video.find();
-    res.json(videos);
+
+    try {
+
+        const videos = await Video.find().sort({
+            createdAt: -1
+        });
+
+        return res.json(videos);
+
+    } catch (error) {
+
+        return res.status(500).json({
+            message: error.message
+        });
+
+    }
+
 };
+
+export const getVideoById = async(req,res)=>{
+
+    try{
+
+        const video =
+        await Video.findById(req.params.id);
+
+        if(!video){
+
+            return res.status(404).json({
+                message:"Video not found"
+            });
+
+        }
+
+        return res.json(video);
+
+    }catch(error){
+
+        return res.status(500).json({
+            message:error.message
+        });
+
+    }
+
+}

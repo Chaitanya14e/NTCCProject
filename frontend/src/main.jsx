@@ -5,6 +5,7 @@ import TotalVideos from '../components/TotalVideos/TotalVideos.jsx'
 import AnomalyVideos from '../components/AnomalyVideos/AnomalyVideos.jsx'
 import CleanVideos from '../components/CleanVideos/CleanVideos.jsx'
 import App from './App.jsx'
+import VideoDetails from "../components/pages/VideoDetails.jsx";
 
 const router = createBrowserRouter([
   {
@@ -22,6 +23,10 @@ const router = createBrowserRouter([
   {
     path:"/clean",
     element:<CleanVideos/>
+  },
+  {
+    path:"/video/:id",  
+    element:<VideoDetails/>
   }
 ])
 
