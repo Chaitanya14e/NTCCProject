@@ -20,6 +20,12 @@ app.use(
     express.static("uploads/frames")
 );
 import videoRouter from "./routes/video.routes.js"
+import notificationRouter from "./routes/notification.routes.js";
+
+app.use(
+    "/notification",
+    notificationRouter
+);
 app.use("/video",videoRouter)
 
 export {app}
