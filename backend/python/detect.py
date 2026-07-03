@@ -13,16 +13,19 @@ import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 os.environ["YOLO_VERBOSE"] = "False"
 
-VIDEO_PATH = sys.argv[1]
-
-# ── MUST match Colab notebook exactly ─────────────────────
+# ── Constants (MUST match Colab notebook exactly) ──────────
 SEQUENCE_LENGTH = 64
 STRIDE = 32
 FRAME_SKIP = 5
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL_PATH = "./python/final_anomaly_model.pth"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_PATH = os.path.join(BASE_DIR, "final_anomaly_model.pth")
+
+TARGET_CLASSES = [0, 1, 2, 3, 5, 7]  # person, bicycle, car, motorcycle, bus, truck
 
 
+# ── Model class ─────────────────────────────────────────────
 class AnomalyDetectionModel(nn.Module):
 
     def __init__(self):
@@ -63,9 +66,10 @@ class AnomalyDetectionModel(nn.Module):
         return logits, attention_weights
 
 
-# ── Load models ────────────────────────────────────────────
-yolo_model = YOLO("yolov8n.pt")
+# ── Load models (loaded once at import time) ────────────────
+YOLO_MODEL_PATH = os.path.join(BASE_DIR, "yolov8n.pt")
 
+yolo_model = YOLO(YOLO_MODEL_PATH)
 efficientnet = timm.create_model(
     "efficientnet_b0",
     pretrained=True,
@@ -79,28 +83,20 @@ model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.to(DEVICE)
 model.eval()
 
+
+# ── Transform ─────────────────────────────────────────────
 transform = transforms.Compose([
-
     transforms.ToPILImage(),
-
-    transforms.Resize((224,224)),
-
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
-
     transforms.Normalize(
-
-        mean=[0.485,0.456,0.406],
-
-        std=[0.229,0.224,0.225]
-
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
     )
-
 ])
 
-TARGET_CLASSES = [0, 1, 2, 3, 5, 7]  # person, bicycle, car, motorcycle, bus, truck
 
-
-# ── Helpers ───────────────────────────────────────────────
+# ── Helper functions ──────────────────────────────────────────
 def save_frame(video_path, frame_idx=0, annotated_frame=None):
     os.makedirs("uploads/frames", exist_ok=True)
     video_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -130,12 +126,12 @@ def extract_roi(frame):
         if cls not in TARGET_CLASSES:
             continue
         x1, y1, x2, y2 = map(int, box.xyxy[0])
-        if x2<=x1 or y2<=y1:
-                continue
-        x1=max(0,x1)
-        y1=max(0,y1)
-        x2=min(frame.shape[1],x2)
-        y2=min(frame.shape[0],y2)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(frame.shape[1], x2)
+        y2 = min(frame.shape[0], y2)
         area = (x2 - x1) * (y2 - y1)
         score = area * float(box.conf.item())
         if score > best_score:
@@ -172,8 +168,8 @@ def extract_video_features(video_path):
     cap.release()
     return np.array(features)
 
-def find_anomaly_object(frame, conf=0.05):
 
+def find_anomaly_object(frame, conf=0.05):
     results = yolo_model(
         frame,
         conf=0.15,
@@ -223,16 +219,13 @@ def find_anomaly_object(frame, conf=0.05):
             best_box = box
 
     if best_box is not None:
-
         print(
             "SELECTED:",
             results.names[int(best_box.cls.item())],
             float(best_box.conf.item()),
             file=sys.stderr
         )
-
     else:
-
         print(
             "No TARGET object selected",
             file=sys.stderr
@@ -240,236 +233,234 @@ def find_anomaly_object(frame, conf=0.05):
 
     return best_box, results
 
-# ── Read real video fps/frame count ───────────────────────
-cap = cv2.VideoCapture(VIDEO_PATH)
-fps = cap.get(cv2.CAP_PROP_FPS)
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-cap.release()
-if fps <= 0 or fps != fps:
-    fps = 25
 
-video_duration = total_frames / fps
-effective_fps = fps / FRAME_SKIP
-
-print(f"Video FPS: {fps}", file=sys.stderr)
-print(f"Effective FPS (after FRAME_SKIP): {effective_fps}", file=sys.stderr)
-print(f"Total Frames: {total_frames}", file=sys.stderr)
-print(f"Video Duration: {video_duration:.2f}s", file=sys.stderr)
-
-# ── Extract features ──────────────────────────────────────
-features = extract_video_features(VIDEO_PATH)
-print(f"Extracted feature frames: {len(features)}", file=sys.stderr)
-
-# ── Too short to analyze → clean ─────────────────────────
-if len(features) < SEQUENCE_LENGTH:
-    frame_path = save_frame(VIDEO_PATH, frame_idx=0)
-    result = {
-        "status": "clean",
-        "time": None,
-        "confidence": 100,
-        "frame": frame_path
-    }
-    print(json.dumps(result))
-    sys.exit()
-
-# ── Build coarse sequences with STRIDE (matches training) ──
-sequences = []
-start_indices = []
-
-for start in range(0, len(features) - SEQUENCE_LENGTH + 1, STRIDE):
-    seq = features[start:start + SEQUENCE_LENGTH]
-    sequences.append(seq)
-    start_indices.append(start)
-
-print(f"Total Sequences: {len(sequences)}", file=sys.stderr)
-
-if len(sequences) == 0:
-    frame_path = save_frame(VIDEO_PATH, frame_idx=0)
-    result = {
-        "status": "clean",
-        "time": None,
-        "confidence": 100,
-        "frame": frame_path
-    }
-    print(json.dumps(result))
-    sys.exit()
-
-all_scores = []
-
-with torch.no_grad():
-    for seq in sequences:
-        x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        logits, _ = model(x)
-        score = torch.sigmoid(logits).item()
-        all_scores.append(score)
-
-all_scores = np.array(all_scores)
-max_score = float(np.max(all_scores))
-best_window = int(np.argmax(all_scores))
-
-THRESHOLD = 0.5
-
-anomaly_confidence = max(0, min(100, round(max_score * 100, 2)))
-clean_confidence = max(0, min(100, round((1 - max_score) * 100, 2)))
-
-window_start = start_indices[best_window]
-window_end_time = min((window_start + SEQUENCE_LENGTH - 1) / effective_fps, video_duration)
-window_start_time = window_start / effective_fps
-
-print(f"Best Window: {best_window} (start_idx={window_start})", file=sys.stderr)
-print(f"Max Score: {max_score:.4f}", file=sys.stderr)
-print(f"Window time range: {window_start_time:.2f}s - {window_end_time:.2f}s", file=sys.stderr)
-
-with torch.no_grad():
-
-    seq = features[
-        window_start :
-        window_start + SEQUENCE_LENGTH
-    ]
-
-    x = torch.tensor(
-        seq,
-        dtype=torch.float32
-    ).unsqueeze(0).to(DEVICE)
-
-    _, attention = model(x)
-
-attention = attention.cpu().numpy().squeeze(0)
-
-print(f"Attention shape: {attention.shape}", file=sys.stderr)
-
-# Use the center of the anomalous window
-important_local_idx = SEQUENCE_LENGTH // 2
-
-global_idx = window_start + important_local_idx
-
-raw_frame = global_idx * FRAME_SKIP
-
-actual_frame = min(raw_frame, total_frames - 1)
-
-anomaly_time = actual_frame / fps
-
-print(f"Important Local Frame: {important_local_idx}", file=sys.stderr)
-print(f"Global Feature Idx: {global_idx}", file=sys.stderr)
-print(f"Raw Frame: {raw_frame}", file=sys.stderr)
-print(f"Actual Frame (clamped): {actual_frame}", file=sys.stderr)
-print(f"Final Anomaly Time: {anomaly_time:.2f}s / {video_duration:.2f}s", file=sys.stderr)
-
-# ── Anomaly branch ────────────────────────────────────────
-frame_path = None
-
-if max_score > THRESHOLD:
-    cap = cv2.VideoCapture(VIDEO_PATH)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
-    ret, frame = cap.read()
+# ── Main entry point ─────────────────────────────────────────
+def analyze_video(video_path):
+    # ── Read real video fps/frame count ───────────────────────
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
+    if fps <= 0 or fps != fps:
+        fps = 25
 
-    if ret:
-        best_box, results = find_anomaly_object(frame, conf=0.05)
-        print(
-            f"YOLO detections: {len(results.boxes)}",
-            file=sys.stderr
-        )
+    video_duration = total_frames / fps
+    effective_fps = fps / FRAME_SKIP
 
-        # If nothing found on the exact frame, search a few frames around it
-        if best_box is None:
-            # search_offsets = [-10, -5, 5, 10, -15, 15]
-            search_offsets = [0, -5, 5, -10, 10, -15, 15]
-            best_probe_score = 0
-            for offset in search_offsets:
-                probe_frame_idx = actual_frame + offset
-                if probe_frame_idx < 0 or probe_frame_idx >= total_frames:
-                    continue
-                cap = cv2.VideoCapture(VIDEO_PATH)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, probe_frame_idx)
-                ret2, probe_frame = cap.read()
-                cap.release()
-                if not ret2:
-                    continue
-                probe_box, probe_results = find_anomaly_object(probe_frame, conf=0.05)
-                if probe_box is not None:
-                    probe_cls = int(probe_box.cls.item())
+    print(f"Video FPS: {fps}", file=sys.stderr)
+    print(f"Effective FPS (after FRAME_SKIP): {effective_fps}", file=sys.stderr)
+    print(f"Total Frames: {total_frames}", file=sys.stderr)
+    print(f"Video Duration: {video_duration:.2f}s", file=sys.stderr)
 
-                    if probe_cls == 0:
-                        score = 100 + float(probe_box.conf.item())
-                    else:
-                        score = float(probe_box.conf.item())
-                    if score > best_probe_score:
-                        actual_frame = probe_frame_idx
-                        anomaly_time = actual_frame / fps
-                        best_probe_score = score
-                        best_box = probe_box
-                        results = probe_results
-                        frame = probe_frame
-                        print(f"Found object at offset {offset} frames", file=sys.stderr)
+    # ── Extract features ──────────────────────────────────────
+    features = extract_video_features(video_path)
+    print(f"Extracted feature frames: {len(features)}", file=sys.stderr)
 
+    # ── Too short to analyze → clean ─────────────────────────
+    if len(features) < SEQUENCE_LENGTH:
+        frame_path = save_frame(video_path, frame_idx=0)
+        result = {
+            "status": "clean",
+            "time": None,
+            "confidence": 100,
+            "frame": frame_path
+        }
+        return result
 
-        if best_box is not None:
+    # ── Build coarse sequences with STRIDE (matches training) ──
+    sequences = []
+    start_indices = []
 
-            cls = int(best_box.cls.item())
+    for start in range(0, len(features) - SEQUENCE_LENGTH + 1, STRIDE):
+        seq = features[start:start + SEQUENCE_LENGTH]
+        sequences.append(seq)
+        start_indices.append(start)
 
-            x1, y1, x2, y2 = map(int, best_box.xyxy[0])
+    print(f"Total Sequences: {len(sequences)}", file=sys.stderr)
 
-            conf = float(best_box.conf.item())
+    if len(sequences) == 0:
+        frame_path = save_frame(video_path, frame_idx=0)
+        result = {
+            "status": "clean",
+            "time": None,
+            "confidence": 100,
+            "frame": frame_path
+        }
+        return result
+
+    all_scores = []
+
+    with torch.no_grad():
+        for seq in sequences:
+            x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+            logits, _ = model(x)
+            score = torch.sigmoid(logits).item()
+            all_scores.append(score)
+
+    all_scores = np.array(all_scores)
+    max_score = float(np.max(all_scores))
+    best_window = int(np.argmax(all_scores))
+
+    THRESHOLD = 0.5
+
+    anomaly_confidence = max(0, min(100, round(max_score * 100, 2)))
+    clean_confidence = max(0, min(100, round((1 - max_score) * 100, 2)))
+
+    window_start = start_indices[best_window]
+    window_end_time = min((window_start + SEQUENCE_LENGTH - 1) / effective_fps, video_duration)
+    window_start_time = window_start / effective_fps
+
+    print(f"Best Window: {best_window} (start_idx={window_start})", file=sys.stderr)
+    print(f"Max Score: {max_score:.4f}", file=sys.stderr)
+    print(f"Window time range: {window_start_time:.2f}s - {window_end_time:.2f}s", file=sys.stderr)
+
+    with torch.no_grad():
+
+        seq = features[
+            window_start:
+            window_start + SEQUENCE_LENGTH
+        ]
+
+        x = torch.tensor(
+            seq,
+            dtype=torch.float32
+        ).unsqueeze(0).to(DEVICE)
+
+        _, attention = model(x)
+
+    attention = attention.cpu().numpy().squeeze(0)
+
+    print(f"Attention shape: {attention.shape}", file=sys.stderr)
+
+    # Use the center of the anomalous window
+    important_local_idx = SEQUENCE_LENGTH // 2
+
+    global_idx = window_start + important_local_idx
+
+    raw_frame = global_idx * FRAME_SKIP
+
+    actual_frame = min(raw_frame, total_frames - 1)
+
+    anomaly_time = actual_frame / fps
+
+    print(f"Important Local Frame: {important_local_idx}", file=sys.stderr)
+    print(f"Global Feature Idx: {global_idx}", file=sys.stderr)
+    print(f"Raw Frame: {raw_frame}", file=sys.stderr)
+    print(f"Actual Frame (clamped): {actual_frame}", file=sys.stderr)
+    print(f"Final Anomaly Time: {anomaly_time:.2f}s / {video_duration:.2f}s", file=sys.stderr)
+
+    # ── Anomaly branch ────────────────────────────────────────
+    frame_path = None
+
+    if max_score > THRESHOLD:
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
+        ret, frame = cap.read()
+        cap.release()
+
+        if ret:
+            best_box, results = find_anomaly_object(frame, conf=0.05)
             print(
-                "Drawing rectangle:",
-                x1, y1, x2, y2,
+                f"YOLO detections: {len(results.boxes)}",
                 file=sys.stderr
             )
-            cv2.rectangle(
-                frame,
-                (x1, y1),
-                (x2, y2),
-                (0, 0, 255),
-                3
-            )
 
-            cv2.putText(
-                frame,
-                f"{results.names[cls]} {conf:.2f}",
-                (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 255),
-                2
-            )
+            # If nothing found on the exact frame, search a few frames around it
+            if best_box is None:
+                search_offsets = [0, -5, 5, -10, 10, -15, 15]
+                best_probe_score = 0
+                for offset in search_offsets:
+                    probe_frame_idx = actual_frame + offset
+                    if probe_frame_idx < 0 or probe_frame_idx >= total_frames:
+                        continue
+                    cap = cv2.VideoCapture(video_path)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, probe_frame_idx)
+                    ret2, probe_frame = cap.read()
+                    cap.release()
+                    if not ret2:
+                        continue
+                    probe_box, probe_results = find_anomaly_object(probe_frame, conf=0.05)
+                    if probe_box is not None:
+                        probe_cls = int(probe_box.cls.item())
 
-        else:
+                        if probe_cls == 0:
+                            score = 100 + float(probe_box.conf.item())
+                        else:
+                            score = float(probe_box.conf.item())
+                        if score > best_probe_score:
+                            actual_frame = probe_frame_idx
+                            anomaly_time = actual_frame / fps
+                            best_probe_score = score
+                            best_box = probe_box
+                            results = probe_results
+                            frame = probe_frame
+                            print(f"Found object at offset {offset} frames", file=sys.stderr)
 
-            print(
-                "No YOLO detection found in TARGET_CLASSES",
-                file=sys.stderr
-            )
+            if best_box is not None:
 
-        cv2.putText(frame, f"Anomaly: {anomaly_confidence:.1f}%",
-                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cls = int(best_box.cls.item())
 
-        frame_path = save_frame(VIDEO_PATH, annotated_frame=frame)
+                x1, y1, x2, y2 = map(int, best_box.xyxy[0])
 
-    print(f"Frame Path: {frame_path}", file=sys.stderr)
+                conf = float(best_box.conf.item())
+                print(
+                    "Drawing rectangle:",
+                    x1, y1, x2, y2,
+                    file=sys.stderr
+                )
+                cv2.rectangle(
+                    frame,
+                    (x1, y1),
+                    (x2, y2),
+                    (0, 0, 255),
+                    3
+                )
 
-    result = {
-        "status": "anomaly",
-        "time": f"{anomaly_time:.2f} sec",
-        "time_range": f"{window_start_time:.1f}s - {window_end_time:.1f}s",
-        "confidence": float(anomaly_confidence),
-        "frame": frame_path,
-        "frame_number": int(actual_frame),
-        "window": int(best_window),
-        "threshold": float(THRESHOLD)
-    }
+                cv2.putText(
+                    frame,
+                    f"{results.names[cls]} {conf:.2f}",
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 0, 255),
+                    2
+                )
 
-# ── Clean branch ──────────────────────────────────────────
-else:
-    frame_path = save_frame(VIDEO_PATH, frame_idx=total_frames//2)
-    print(f"Frame Path: {frame_path}", file=sys.stderr)
+            else:
+                print(
+                    "No YOLO detection found in TARGET_CLASSES",
+                    file=sys.stderr
+                )
 
-    result = {
-        "status":"clean",
-        "time":None,
-        "confidence":float(clean_confidence),
-        "frame":frame_path,
-        "threshold":float(THRESHOLD)
-    }
+            cv2.putText(frame, f"Anomaly: {anomaly_confidence:.1f}%",
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-print(json.dumps(result))
+            frame_path = save_frame(video_path, annotated_frame=frame)
+
+        print(f"Frame Path: {frame_path}", file=sys.stderr)
+
+        result = {
+            "status": "anomaly",
+            "time": f"{anomaly_time:.2f} sec",
+            "time_range": f"{window_start_time:.1f}s - {window_end_time:.1f}s",
+            "confidence": float(anomaly_confidence),
+            "frame": frame_path,
+            "frame_number": int(actual_frame),
+            "window": int(best_window),
+            "threshold": float(THRESHOLD)
+        }
+
+    # ── Clean branch ──────────────────────────────────────────
+    else:
+        frame_path = save_frame(video_path, frame_idx=total_frames // 2)
+        print(f"Frame Path: {frame_path}", file=sys.stderr)
+
+        result = {
+            "status": "clean",
+            "time": None,
+            "confidence": float(clean_confidence),
+            "frame": frame_path,
+            "threshold": float(THRESHOLD)
+        }
+
+    return result

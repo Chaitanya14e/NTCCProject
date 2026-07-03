@@ -1,4 +1,6 @@
-import { spawn } from "child_process";
+import axios from "axios";
+import FormData from "form-data";
+import fs from "fs";
 import { Video } from "../models/video.models.js";
 import { Notification } from "../models/notification.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
@@ -9,48 +11,22 @@ export const uploadVideo = async (req, res) => {
 
         console.log("Video received");
 
-        const python = spawn(
-            "python",
-            [
-                "./python/detect.py",
-                req.file.path
-            ]
+        const formData = new FormData();
+
+        formData.append(
+            "video",
+            fs.createReadStream(req.file.path)
         );
 
-        console.log("Python process started");
-
-        let output = "";
-
-        python.stdout.on("data", (data) => {
-            output += data.toString();
-        });
-
-        python.stderr.on("data", (data) => {
-            console.log("PYTHON ERROR:", data.toString());
-        });
-
-        python.on("close", async () => {
-
-            console.log("Python Output:", output);
-
-            const lines = output.trim().split("\n");
-            const lastLine = lines[lines.length - 1];
-
-            let result;
-
-            try {
-
-                result = JSON.parse(lastLine);
-
-            } catch (err) {
-
-                console.error("Failed to parse Python output:", output);
-
-                return res.status(500).json({
-                    message: "Invalid JSON from Python script"
-                });
-
+        const response = await axios.post(
+            "http://127.0.0.1:8000/analyze",
+            formData,
+            {
+                headers: formData.getHeaders()
             }
+        );
+
+        const result = response.data;
 
             // Upload original video AFTER Python finishes
             const uploadedVideo = await uploadOnCloudinary(
@@ -126,8 +102,6 @@ export const uploadVideo = async (req, res) => {
                 });
 
             }
-
-        });
 
     } catch (error) {
 
