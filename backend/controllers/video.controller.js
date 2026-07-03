@@ -1,6 +1,4 @@
-import axios from "axios";
-import FormData from "form-data";
-import fs from "fs";
+import { spawn } from "child_process";
 import { Video } from "../models/video.models.js";
 import { Notification } from "../models/notification.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
@@ -11,22 +9,48 @@ export const uploadVideo = async (req, res) => {
 
         console.log("Video received");
 
-        const formData = new FormData();
-
-        formData.append(
-            "video",
-            fs.createReadStream(req.file.path)
+        const python = spawn(
+            "python",
+            [
+                "./python/detect.py",
+                req.file.path
+            ]
         );
 
-        const response = await axios.post(
-            "http://127.0.0.1:8000/analyze",
-            formData,
-            {
-                headers: formData.getHeaders()
+        console.log("Python process started");
+
+        let output = "";
+
+        python.stdout.on("data", (data) => {
+            output += data.toString();
+        });
+
+        python.stderr.on("data", (data) => {
+            console.log("PYTHON ERROR:", data.toString());
+        });
+
+        python.on("close", async () => {
+
+            console.log("Python Output:", output);
+
+            const lines = output.trim().split("\n");
+            const lastLine = lines[lines.length - 1];
+
+            let result;
+
+            try {
+
+                result = JSON.parse(lastLine);
+
+            } catch (err) {
+
+                console.error("Failed to parse Python output:", output);
+
+                return res.status(500).json({
+                    message: "Invalid JSON from Python script"
+                });
+
             }
-        );
-
-        const result = response.data;
 
             // Upload original video AFTER Python finishes
             const uploadedVideo = await uploadOnCloudinary(
@@ -34,9 +58,9 @@ export const uploadVideo = async (req, res) => {
                 "video",
                 "NTCC/videos"
             );
+
             console.log("Uploaded Video Object:", uploadedVideo);
 
-            // Upload frame if available
             let uploadedFrame = null;
 
             if (result.frame) {
@@ -49,6 +73,7 @@ export const uploadVideo = async (req, res) => {
 
                 result.frame = uploadedFrame?.secure_url;
             }
+
             console.log("Uploaded Frame Object:", uploadedFrame);
 
             try {
@@ -102,6 +127,8 @@ export const uploadVideo = async (req, res) => {
                 });
 
             }
+
+        });
 
     } catch (error) {
 
